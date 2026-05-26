@@ -1,10 +1,35 @@
 package router
 
 import (
+	"context"
 	"net/http"
-
-	"go.opentelemetry.io/otel/trace"
 )
+
+// Tracer creates spans for HTTP requests.
+// Implement with your OpenTelemetry TracerProvider:
+//
+//	type otelTracer struct{ tracer trace.Tracer }
+//	func (t otelTracer) Start(ctx context.Context, name string) (context.Context, Span) {
+//	    ctx, span := t.tracer.Start(ctx, name)
+//	    return ctx, span
+//	}
+type Tracer interface {
+	Start(ctx context.Context, name string) (context.Context, Span)
+}
+
+// Span represents an active trace span. Compatible with
+// go.opentelemetry.io/otel/trace.Span.
+type Span interface {
+	End()
+}
+
+// WithTracer sets the tracer used to create request spans.
+// When not set, no spans are created.
+func WithTracer(t Tracer) Option {
+	return func(r *Router) {
+		r.tracer = t
+	}
+}
 
 type statusWriter struct {
 	http.ResponseWriter
@@ -30,13 +55,4 @@ func (w *statusWriter) Write(b []byte) (int, error) {
 
 func (w *statusWriter) Unwrap() http.ResponseWriter {
 	return w.ResponseWriter
-}
-
-func startSpan(tracer trace.Tracer, req *http.Request, routePattern string) (*http.Request, trace.Span, *statusWriter) {
-	if tracer == nil {
-		return req, nil, nil
-	}
-
-	ctx, span := tracer.Start(req.Context(), req.Method+" "+routePattern)
-	return req.WithContext(ctx), span, nil
 }

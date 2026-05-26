@@ -5,8 +5,6 @@ import (
 	"slices"
 	"strings"
 	"sync"
-
-	"go.opentelemetry.io/otel/trace"
 )
 
 // Auth is the interface for per-route authorization.
@@ -27,22 +25,14 @@ var Allow Auth = &allowAuth{}
 // Option configures a Router.
 type Option func(*Router)
 
-// WithTracerProvider sets the OpenTelemetry TracerProvider used to create
-// request spans. When not set, no spans are created (zero overhead).
-func WithTracerProvider(tp trace.TracerProvider) Option {
-	return func(r *Router) {
-		r.tracerProvider = tp
-	}
-}
 
 // Router is an HTTP request router with support for multi-segment path
 // parameters, per-route auth, and OpenTelemetry tracing.
 type Router struct {
-	mu             sync.RWMutex
-	routes         []registeredRoute
-	auths          map[Auth]bool
-	tracerProvider trace.TracerProvider
-	tracer         trace.Tracer
+	mu     sync.RWMutex
+	routes []registeredRoute
+	auths  map[Auth]bool
+	tracer Tracer
 }
 
 type registeredRoute struct {
@@ -72,9 +62,6 @@ func New(opts ...Option) *Router {
 	}
 	for _, opt := range opts {
 		opt(r)
-	}
-	if r.tracerProvider != nil {
-		r.tracer = r.tracerProvider.Tracer("router")
 	}
 	return r
 }
@@ -227,6 +214,7 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 
 	if r.tracer != nil {
+		var span Span
 		ctx, span := r.tracer.Start(req.Context(), req.Method+" "+best.pat.path)
 		defer span.End()
 		req = req.WithContext(ctx)
