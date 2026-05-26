@@ -156,6 +156,7 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		rawPath = req.URL.Path
 	}
 	pathSegs := splitPath(rawPath)
+	trailing := hasTrailingSlash(rawPath)
 
 	r.mu.RLock()
 	routes := r.routes
@@ -168,7 +169,7 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 
 	for i := range routes {
 		rr := &routes[i]
-		params, ok := tryMatch(rr.pat, pathSegs)
+		params, ok := tryMatch(rr.pat, pathSegs, trailing)
 		if !ok {
 			continue
 		}
