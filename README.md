@@ -9,6 +9,7 @@ HTTP request router with multi-segment path parameters.
 - **Correct 405**: Returns 405 Method Not Allowed with `Allow` header instead of 404.
 - **Per-route auth**: Registered `Auth` interface checked before handler runs. `router.Allow` for public routes.
 - **Tracing**: Optional `Tracer` interface for OpenTelemetry integration with zero hard dependencies.
+- **Host matching**: A pattern may carry an optional host portion before the path (`apt.{domain}/{path...}`). `{domain}` is a host wildcard capturing the trailing labels. Host-bearing routes match by `req.Host`; host-agnostic routes serve every other host.
 - **Pattern syntax**: Compatible with Go 1.22+ ServeMux patterns, plus intra-segment params and query param extraction.
 
 ## Usage
@@ -35,13 +36,42 @@ r.HandleFunc("/v2/", myAuth, ociHandler)
 // Wildcard
 r.HandleFunc("GET /sites/{project}/branch/{branch}/{path...}", myAuth, siteHandler)
 
+// Host matching: serve a subdomain and capture the base domain.
+// GET apt.example.com/dists/stable/InRelease
+// -> domain = "example.com", path = "dists/stable/InRelease"
+r.HandleFunc("GET apt.{domain}/{path...}", myAuth, aptHandler)
+
 // Route listing
 for _, route := range r.Routes() {
-    fmt.Println(route) // "/dl/{project}/latest/{os}/{arch} {GET}"
+    fmt.Println(route) // "apt.{domain}/{path...} {GET}"
 }
 
 http.ListenAndServe(":8080", r)
 ```
+
+## Host matching
+
+A pattern that does not begin with `/` (after the optional method) carries a
+**host portion** before the path, separated by the first `/`:
+
+```
+GET apt.{domain}/{path...}
+    └── host ──┘└── path ──┘
+```
+
+- Literal host labels (`apt`) must match the corresponding leading labels of
+  `req.Host` exactly (the port is stripped).
+- A trailing `{name}` label is a host wildcard binding `name` to the remaining
+  labels (`apt.foo.example.com` -> `domain = "foo.example.com"`), available via
+  `req.PathValue("domain")`.
+- A pattern with **no** host portion is host-agnostic and matches any host.
+
+Host partitioning is strict: when a request host matches at least one
+host-bearing route, host-agnostic routes are **not** eligible for that request.
+A known subdomain therefore commits to its own routes and never falls through to
+bare-host routes (an unmatched path under that subdomain is a 404). Requests
+whose host matches no host-bearing route are served by host-agnostic routes as
+usual. Routers that register no host portion pay zero overhead for this.
 
 ## Matching algorithm
 

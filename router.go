@@ -29,10 +29,11 @@ type Option func(*Router)
 // Router is an HTTP request router with support for multi-segment path
 // parameters, per-route auth, and OpenTelemetry tracing.
 type Router struct {
-	mu     sync.RWMutex
-	routes []registeredRoute
-	auths  map[Auth]bool
-	tracer Tracer
+	mu            sync.RWMutex
+	routes        []registeredRoute
+	auths         map[Auth]bool
+	tracer        Tracer
+	hasHostRoutes bool // any registered route carries a host portion
 }
 
 type registeredRoute struct {
@@ -99,6 +100,9 @@ func (r *Router) Handle(pattern string, auth Auth, handler http.Handler) {
 		auth:    auth,
 		handler: handler,
 	})
+	if len(pat.hostSegs) > 0 {
+		r.hasHostRoutes = true
+	}
 }
 
 // HandleFunc registers a route with a handler function.
@@ -121,18 +125,18 @@ func (r *Router) Routes() []Route {
 	idx := 0
 
 	for _, rr := range r.routes {
-		path := rr.pat.path
-		if e, ok := groups[path]; ok {
+		key := rr.pat.full()
+		if e, ok := groups[key]; ok {
 			if rr.pat.method != "" && !slices.Contains(e.route.Methods, rr.pat.method) {
 				e.route.Methods = append(e.route.Methods, rr.pat.method)
 			}
 		} else {
-			e := &entry{route: Route{Pattern: path}, order: idx}
+			e := &entry{route: Route{Pattern: key}, order: idx}
 			idx++
 			if rr.pat.method != "" {
 				e.route.Methods = []string{rr.pat.method}
 			}
-			groups[path] = e
+			groups[key] = e
 		}
 	}
 
@@ -160,7 +164,28 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 
 	r.mu.RLock()
 	routes := r.routes
+	hasHost := r.hasHostRoutes
 	r.mu.RUnlock()
+
+	// Host partitioning: when the request host matches any host-bearing route,
+	// it is "claimed" and host-agnostic routes become ineligible. This makes a
+	// known subdomain commit to its own routes (never falling through to bare-
+	// host routes), exactly as a per-subdomain dispatch table would. Pure path
+	// routers register no host routes and skip this entirely.
+	var hostLabels []string
+	hostClaimed := false
+	if hasHost {
+		hostLabels = splitHost(req.Host)
+		for i := range routes {
+			if len(routes[i].pat.hostSegs) == 0 {
+				continue
+			}
+			if _, ok := matchHostSegs(routes[i].pat.hostSegs, hostLabels); ok {
+				hostClaimed = true
+				break
+			}
+		}
+	}
 
 	var best *registeredRoute
 	var bestParams map[string]string
@@ -169,9 +194,22 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 
 	for i := range routes {
 		rr := &routes[i]
+		var domain string
+		if len(rr.pat.hostSegs) > 0 {
+			d, ok := matchHostSegs(rr.pat.hostSegs, hostLabels)
+			if !ok {
+				continue
+			}
+			domain = d
+		} else if hostClaimed {
+			continue
+		}
 		params, ok := tryMatch(rr.pat, pathSegs, trailing)
 		if !ok {
 			continue
+		}
+		if rr.pat.hostWild != "" {
+			params[rr.pat.hostWild] = domain
 		}
 		if rr.pat.method != "" && rr.pat.method != req.Method {
 			allowed = append(allowed, rr.pat.method)
