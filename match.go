@@ -5,6 +5,48 @@ import (
 	"strings"
 )
 
+// splitHost returns the dot-separated labels of a request host, with any port
+// and surrounding dots stripped. "apt.example.com:8080" -> ["apt","example","com"].
+func splitHost(host string) []string {
+	if i := strings.LastIndexByte(host, ':'); i >= 0 {
+		host = host[:i]
+	}
+	host = strings.Trim(host, ".")
+	if host == "" {
+		return nil
+	}
+	return strings.Split(host, ".")
+}
+
+// matchHostSegs reports whether a pattern's host labels match the request host
+// labels. When the pattern ends in a wildcard, the captured remaining labels are
+// returned (joined by ".") as domain.
+func matchHostSegs(segs []hostSeg, hostLabels []string) (domain string, ok bool) {
+	n := len(segs)
+	if n == 0 {
+		return "", true
+	}
+	wild := segs[n-1].wild
+	litCount := n
+	if wild {
+		litCount = n - 1
+		if len(hostLabels) <= litCount { // wildcard needs at least one label
+			return "", false
+		}
+	} else if len(hostLabels) != litCount {
+		return "", false
+	}
+	for i := 0; i < litCount; i++ {
+		if segs[i].value != hostLabels[i] {
+			return "", false
+		}
+	}
+	if wild {
+		return strings.Join(hostLabels[litCount:], "."), true
+	}
+	return "", true
+}
+
 func splitPath(rawPath string) []string {
 	if rawPath == "" || rawPath == "/" {
 		return nil
