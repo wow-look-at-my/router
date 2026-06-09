@@ -25,7 +25,6 @@ var Allow Auth = &allowAuth{}
 // Option configures a Router.
 type Option func(*Router)
 
-
 // Router is an HTTP request router with support for multi-segment path
 // parameters, per-route auth, and OpenTelemetry tracing.
 type Router struct {
@@ -211,11 +210,12 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		if rr.pat.hostWild != "" {
 			params[rr.pat.hostWild] = domain
 		}
-		if rr.pat.method != "" && rr.pat.method != req.Method {
-			allowed = append(allowed, rr.pat.method)
+		methodScore, ok := matchMethod(rr.pat.method, req.Method)
+		if !ok {
+			allowed = appendAllowedMethods(allowed, rr.pat.method)
 			continue
 		}
-		score := rr.pat.priority()
+		score := rr.pat.priority()*10 + methodScore
 		if best == nil || score > bestScore {
 			best = rr
 			bestParams = params
@@ -225,9 +225,14 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 
 	if best == nil {
 		if len(allowed) > 0 {
+			allowed = append(allowed, http.MethodOptions)
 			slices.Sort(allowed)
 			allowed = slices.Compact(allowed)
 			w.Header().Set("Allow", strings.Join(allowed, ", "))
+			if req.Method == http.MethodOptions {
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
 			http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
 			return
 		}
@@ -260,4 +265,28 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 
 	best.handler.ServeHTTP(w, req)
+}
+
+func matchMethod(routeMethod, requestMethod string) (int, bool) {
+	if routeMethod == "" {
+		return 0, true
+	}
+	if routeMethod == requestMethod {
+		return 2, true
+	}
+	if routeMethod == http.MethodGet && requestMethod == http.MethodHead {
+		return 1, true
+	}
+	return 0, false
+}
+
+func appendAllowedMethods(allowed []string, routeMethod string) []string {
+	if routeMethod == "" {
+		return allowed
+	}
+	allowed = append(allowed, routeMethod)
+	if routeMethod == http.MethodGet {
+		allowed = append(allowed, http.MethodHead)
+	}
+	return allowed
 }

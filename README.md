@@ -7,6 +7,7 @@ HTTP request router with multi-segment path parameters.
 - **Slashes in path values**: `{param}` matches across `/` boundaries using greedy backtracking. No `%2F` encoding needed.
 - **Route introspection**: `Routes()` returns all registered routes with methods consolidated by path.
 - **Correct 405**: Returns 405 Method Not Allowed with `Allow` header instead of 404.
+- **Automatic HEAD/OPTIONS**: `HEAD` requests route to matching `GET` handlers, and `OPTIONS` returns `Allow`, unless explicit handlers are registered.
 - **Per-route auth**: Registered `Auth` interface checked before handler runs. `router.Allow` for public routes.
 - **Tracing**: Optional `Tracer` interface for OpenTelemetry integration with zero hard dependencies.
 - **Host matching**: A pattern may carry an optional host portion before the path (`apt.{domain}/{path...}`). `{domain}` is a host wildcard capturing the trailing labels. Host-bearing routes match by `req.Host`; host-agnostic routes serve every other host.
