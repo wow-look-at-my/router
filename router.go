@@ -193,13 +193,13 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 
 	for i := range routes {
 		rr := &routes[i]
-		var domain string
+		var hostValues []string
 		if len(rr.pat.hostSegs) > 0 {
-			d, ok := matchHostSegs(rr.pat.hostSegs, hostLabels)
+			v, ok := matchHostSegs(rr.pat.hostSegs, hostLabels)
 			if !ok {
 				continue
 			}
-			domain = d
+			hostValues = v
 		} else if hostClaimed {
 			continue
 		}
@@ -207,8 +207,8 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		if !ok {
 			continue
 		}
-		if rr.pat.hostWild != "" {
-			params[rr.pat.hostWild] = domain
+		for j, name := range rr.pat.hostParams {
+			params[name] = hostValues[j]
 		}
 		methodScore, ok := matchMethod(rr.pat.method, req.Method)
 		if !ok {

@@ -5,7 +5,7 @@ on:
 
 permissions:
   id-token: write
-  contents: read
+  contents: write # go-toolchain's dependency graph submission needs write
 
 jobs:
   test:
