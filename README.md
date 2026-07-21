@@ -72,8 +72,8 @@ GET apt.{domain}/{path...}
 - A **final** `{name}` label is a host wildcard binding the remaining labels
   (`apt.foo.example.com` -> `domain = "foo.example.com"`), available via
   `req.PathValue("domain")`. The forms combine: `{sub}.{domain}` is valid.
-- Partial-label params (`foo{x}bar`) are rejected — host params are whole
-  labels only.
+- Partial-label params (`foo{x}bar`), the empty `{}`, and a host with no
+  following path all panic in `Handle` — host params are whole labels only.
 - A pattern with **no** host portion is host-agnostic and matches any host.
 
 Between host-bearing patterns matching the same request, the one with **more

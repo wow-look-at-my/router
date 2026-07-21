@@ -193,6 +193,25 @@ func TestHostNonFinalParamExactlyOneLabel(t *testing.T) {
 	}
 }
 
+func TestHostBareApexFallsThroughToHostAgnostic(t *testing.T) {
+	r := New()
+	r.HandleFunc("GET {project}.pazer.site/{path...}", Allow, func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(201) // project site
+	})
+	r.HandleFunc("GET /__signin", Allow, func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(202) // apex route
+	})
+
+	// The bare 2-label apex has no label for {project} to bind, so it matches
+	// no host-bearing route, the host stays unclaimed, and host-agnostic apex
+	// routes serve it.
+	req := httptest.NewRequest("GET", "/__signin", nil)
+	req.Host = "pazer.site"
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	require.Equal(t, 202, rec.Code)
+}
+
 func TestHostNonFinalParamAccepted(t *testing.T) {
 	// The pre-generalization parser panicked on a non-final host param (the old
 	// TestHostWildcardNotLastPanics). It is now legal and binds exactly one label.
