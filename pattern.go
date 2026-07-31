@@ -6,25 +6,27 @@ import (
 )
 
 type pattern struct {
-	original     string
-	method       string
-	host         string // raw host portion, e.g. "apt.{domain}"; "" means host-agnostic
-	hostSegs     []hostSeg
-	hostWild     string // name of the trailing host wildcard param, e.g. "domain"
-	path         string
-	segments     []patternSeg
-	queryParams  []queryParam
-	prefix       bool
-	exact        bool
-	literalCount int
+	original         string
+	method           string
+	host             string // raw host portion, e.g. "apt.{domain}"; "" means host-agnostic
+	hostSegs         []hostSeg
+	hostParams       []string // names of host parameter labels, in label order
+	hostLiteralCount int      // number of literal host labels
+	path             string
+	segments         []patternSeg
+	queryParams      []queryParam
+	prefix           bool
+	exact            bool
+	literalCount     int
 }
 
 // hostSeg is one dot-separated label of a pattern's host portion. A label is
-// either a literal (wild == false) or a trailing wildcard capturing the rest of
-// the request host (wild == true).
+// either a literal (wild == false) or a parameter (wild == true): a non-final
+// parameter matches exactly one request-host label, while a final parameter is
+// a wildcard capturing all remaining labels.
 type hostSeg struct {
 	wild  bool
-	value string // literal label text, or wildcard param name
+	value string // literal label text, or parameter name
 }
 
 type segKind int
@@ -138,32 +140,33 @@ func parsePattern(s string) (*pattern, error) {
 }
 
 // parseHost parses a pattern's host portion into dot-separated labels. Literal
-// labels match the corresponding request-host label exactly; a single trailing
-// "{name}" label is a wildcard that captures the remaining host labels.
+// labels match the corresponding request-host label exactly. A whole-label
+// "{name}" is a host parameter: in a non-final position it matches exactly one
+// label; in the final position it is a wildcard capturing the remaining labels.
+// Anything else containing "{" or "}" (e.g. a partial-label "foo{x}bar") is
+// rejected.
 func (p *pattern) parseHost(h string) error {
 	if h == "" {
 		return fmt.Errorf("empty host pattern")
 	}
 	labels := strings.Split(h, ".")
-	for i, label := range labels {
+	for _, label := range labels {
 		switch {
 		case strings.HasPrefix(label, "{") && strings.HasSuffix(label, "}"):
 			name := label[1 : len(label)-1]
 			if name == "" {
-				return fmt.Errorf("empty host wildcard {} in %q", h)
+				return fmt.Errorf("empty host parameter {} in %q", h)
 			}
 			if strings.ContainsAny(name, "{}") {
-				return fmt.Errorf("invalid host wildcard %q", label)
-			}
-			if i != len(labels)-1 {
-				return fmt.Errorf("host wildcard {%s} must be the last label", name)
+				return fmt.Errorf("invalid host parameter %q", label)
 			}
 			p.hostSegs = append(p.hostSegs, hostSeg{wild: true, value: name})
-			p.hostWild = name
+			p.hostParams = append(p.hostParams, name)
 		case strings.ContainsAny(label, "{}"):
 			return fmt.Errorf("invalid host label %q", label)
 		default:
 			p.hostSegs = append(p.hostSegs, hostSeg{value: label})
+			p.hostLiteralCount++
 		}
 	}
 	return nil
@@ -212,7 +215,15 @@ func parseSegment(s string) (patternSeg, error) {
 }
 
 func (p *pattern) priority() int {
-	score := p.literalCount * 10000
+	// Literal host labels outrank every path term: of two host-bearing patterns
+	// matching the same request, the one with more literal host labels wins
+	// wholesale, so e.g. {project}.pazer.site (2 host literals) claims all of
+	// *.pazer.site over dl.{domain} (1 host literal) regardless of path scores.
+	// Patterns with identical host portions add the same constant, leaving the
+	// existing path-based ordering untouched. The weight dominates any realistic
+	// path score (path terms would need ~100 literal segments to reach it).
+	score := p.hostLiteralCount * 1_000_000
+	score += p.literalCount * 10000
 	score += len(p.segments) * 100
 	if p.exact {
 		score += 50

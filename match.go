@@ -19,32 +19,39 @@ func splitHost(host string) []string {
 }
 
 // matchHostSegs reports whether a pattern's host labels match the request host
-// labels. When the pattern ends in a wildcard, the captured remaining labels are
-// returned (joined by ".") as domain.
-func matchHostSegs(segs []hostSeg, hostLabels []string) (domain string, ok bool) {
+// labels. On success, values holds the text captured by each parameter label in
+// label order: a non-final parameter captures exactly the one label at its
+// position, and a final parameter captures all remaining labels (joined by ".").
+func matchHostSegs(segs []hostSeg, hostLabels []string) (values []string, ok bool) {
 	n := len(segs)
 	if n == 0 {
-		return "", true
+		return nil, true
 	}
-	wild := segs[n-1].wild
-	litCount := n
-	if wild {
-		litCount = n - 1
-		if len(hostLabels) <= litCount { // wildcard needs at least one label
-			return "", false
+	greedy := segs[n-1].wild
+	fixed := n // labels matched one-to-one (literals and non-final parameters)
+	if greedy {
+		fixed = n - 1
+		if len(hostLabels) <= fixed { // the trailing wildcard needs at least one label
+			return nil, false
 		}
-	} else if len(hostLabels) != litCount {
-		return "", false
+	} else if len(hostLabels) != fixed {
+		return nil, false
 	}
-	for i := 0; i < litCount; i++ {
-		if segs[i].value != hostLabels[i] {
-			return "", false
+	for i := 0; i < fixed; i++ {
+		if !segs[i].wild && segs[i].value != hostLabels[i] {
+			return nil, false
 		}
 	}
-	if wild {
-		return strings.Join(hostLabels[litCount:], "."), true
+	for i := 0; i < fixed; i++ {
+		if segs[i].wild {
+			values = append(values, hostLabels[i])
+		}
 	}
-	return "", true
+	if greedy {
+		values = append(values, strings.Join(hostLabels[fixed:], "."))
+	}
+	return values, true
+
 }
 
 func splitPath(rawPath string) []string {

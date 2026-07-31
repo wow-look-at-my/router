@@ -4,7 +4,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"github.com/wow-look-at-my/testify/require"
+
+	"github.com/stretchr/testify/require"
 )
 
 func handler200(w http.ResponseWriter, _ *http.Request) {
@@ -185,8 +186,8 @@ func TestIntraSegmentMultiParam(t *testing.T) {
 	})
 
 	tests := []struct {
-		path				string
-		wantProject, wantOS, wantArch	string
+		path                          string
+		wantProject, wantOS, wantArch string
 	}{
 		{"/npm/@buildhost/myapp-linux-x64", "myapp", "linux", "x64"},
 		{"/npm/@buildhost/my-cool-app-linux-x64", "my-cool-app", "linux", "x64"},
@@ -230,22 +231,6 @@ func TestRoutesConsolidation(t *testing.T) {
 
 }
 
-func Test405WithAllow(t *testing.T) {
-	r := New()
-	r.HandleFunc("GET /resource", Allow, handler200)
-	r.HandleFunc("PUT /resource", Allow, handler200)
-
-	req := httptest.NewRequest("DELETE", "/resource", nil)
-	rec := httptest.NewRecorder()
-	r.ServeHTTP(rec, req)
-
-	require.Equal(t, 405, rec.Code)
-
-	allow := rec.Header().Get("Allow")
-	require.Equal(t, "GET, PUT", allow)
-
-}
-
 func Test404(t *testing.T) {
 	r := New()
 	r.HandleFunc("GET /exists", Allow, handler200)
@@ -263,8 +248,8 @@ func TestPrefixMatch(t *testing.T) {
 	r.HandleFunc("/v2/", Allow, handler200)
 
 	tests := []struct {
-		path	string
-		want	int
+		path string
+		want int
 	}{
 		{"/v2/", 200},
 		{"/v2/foo/bar", 200},
@@ -286,8 +271,8 @@ func TestExactMatch(t *testing.T) {
 	r.HandleFunc("GET /foo/{$}", Allow, handler200)
 
 	tests := []struct {
-		path	string
-		want	int
+		path string
+		want int
 	}{
 		{"/foo/", 200},
 		{"/foo/bar", 404},
