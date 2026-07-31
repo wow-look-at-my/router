@@ -6,14 +6,27 @@ import (
 )
 
 type pattern struct {
-	original     string
-	method       string
-	path         string
-	segments     []patternSeg
-	queryParams  []queryParam
-	prefix       bool
-	exact        bool
-	literalCount int
+	original         string
+	method           string
+	host             string // raw host portion, e.g. "apt.{domain}"; "" means host-agnostic
+	hostSegs         []hostSeg
+	hostParams       []string // names of host parameter labels, in label order
+	hostLiteralCount int      // number of literal host labels
+	path             string
+	segments         []patternSeg
+	queryParams      []queryParam
+	prefix           bool
+	exact            bool
+	literalCount     int
+}
+
+// hostSeg is one dot-separated label of a pattern's host portion. A label is
+// either a literal (wild == false) or a parameter (wild == true): a non-final
+// parameter matches exactly one request-host label, while a final parameter is
+// a wildcard capturing all remaining labels.
+type hostSeg struct {
+	wild  bool
+	value string // literal label text, or parameter name
 }
 
 type segKind int
@@ -67,6 +80,21 @@ func parsePattern(s string) (*pattern, error) {
 		}
 	}
 
+	// Optional host portion: a pattern that does not begin with "/" (after the
+	// method) carries a host matcher before the path, e.g. "apt.{domain}/path".
+	// The host portion is everything up to the first "/".
+	if !strings.HasPrefix(rest, "/") {
+		slash := strings.IndexByte(rest, '/')
+		if slash < 0 {
+			return nil, fmt.Errorf("pattern %q: host pattern must be followed by a path", s)
+		}
+		if err := p.parseHost(rest[:slash]); err != nil {
+			return nil, fmt.Errorf("pattern %q: %w", s, err)
+		}
+		p.host = rest[:slash]
+		rest = rest[slash:]
+	}
+
 	p.path = rest
 
 	if len(rest) > 1 && rest[len(rest)-1] == '/' {
@@ -111,6 +139,45 @@ func parsePattern(s string) (*pattern, error) {
 	return p, nil
 }
 
+// parseHost parses a pattern's host portion into dot-separated labels. Literal
+// labels match the corresponding request-host label exactly. A whole-label
+// "{name}" is a host parameter: in a non-final position it matches exactly one
+// label; in the final position it is a wildcard capturing the remaining labels.
+// Anything else containing "{" or "}" (e.g. a partial-label "foo{x}bar") is
+// rejected.
+func (p *pattern) parseHost(h string) error {
+	if h == "" {
+		return fmt.Errorf("empty host pattern")
+	}
+	labels := strings.Split(h, ".")
+	for _, label := range labels {
+		switch {
+		case strings.HasPrefix(label, "{") && strings.HasSuffix(label, "}"):
+			name := label[1 : len(label)-1]
+			if name == "" {
+				return fmt.Errorf("empty host parameter {} in %q", h)
+			}
+			if strings.ContainsAny(name, "{}") {
+				return fmt.Errorf("invalid host parameter %q", label)
+			}
+			p.hostSegs = append(p.hostSegs, hostSeg{wild: true, value: name})
+			p.hostParams = append(p.hostParams, name)
+		case strings.ContainsAny(label, "{}"):
+			return fmt.Errorf("invalid host label %q", label)
+		default:
+			p.hostSegs = append(p.hostSegs, hostSeg{value: label})
+			p.hostLiteralCount++
+		}
+	}
+	return nil
+}
+
+// full returns the pattern's host+path as registered. For host-agnostic
+// patterns (no host portion) this is just the path.
+func (p *pattern) full() string {
+	return p.host + p.path
+}
+
 func parseSegment(s string) (patternSeg, error) {
 	if !strings.Contains(s, "{") {
 		return patternSeg{kind: segLiteral, value: s}, nil
@@ -148,7 +215,15 @@ func parseSegment(s string) (patternSeg, error) {
 }
 
 func (p *pattern) priority() int {
-	score := p.literalCount * 10000
+	// Literal host labels outrank every path term: of two host-bearing patterns
+	// matching the same request, the one with more literal host labels wins
+	// wholesale, so e.g. {project}.pazer.site (2 host literals) claims all of
+	// *.pazer.site over dl.{domain} (1 host literal) regardless of path scores.
+	// Patterns with identical host portions add the same constant, leaving the
+	// existing path-based ordering untouched. The weight dominates any realistic
+	// path score (path terms would need ~100 literal segments to reach it).
+	score := p.hostLiteralCount * 1_000_000
+	score += p.literalCount * 10000
 	score += len(p.segments) * 100
 	if p.exact {
 		score += 50
