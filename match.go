@@ -53,6 +53,7 @@ func matchHostSegs(segs []hostSeg, hostLabels []string) (values []string, ok boo
 	return values, true
 }
 
+
 func splitPath(rawPath string) []string {
 	if rawPath == "" || rawPath == "/" {
 		return nil
