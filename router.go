@@ -5,6 +5,8 @@ import (
 	"slices"
 	"strings"
 	"sync"
+
+	"github.com/wow-look-at-my/go-containers/set"
 )
 
 // Auth is the interface for per-route authorization.
@@ -30,7 +32,7 @@ type Option func(*Router)
 type Router struct {
 	mu            sync.RWMutex
 	routes        []registeredRoute
-	auths         map[Auth]bool
+	auths         set.Set[Auth]
 	tracer        Tracer
 	hasHostRoutes bool // any registered route carries a host portion
 }
@@ -58,7 +60,7 @@ func (r Route) String() string {
 // New creates a Router. router.Allow is pre-registered.
 func New(opts ...Option) *Router {
 	r := &Router{
-		auths: map[Auth]bool{Allow: true},
+		auths: set.Of[Auth](Allow),
 	}
 	for _, opt := range opts {
 		opt(r)
@@ -72,10 +74,9 @@ func (r *Router) Register(auth Auth) {
 	if auth == nil {
 		panic("router: cannot register nil Auth")
 	}
-	if r.auths[auth] {
+	if !r.auths.Add(auth) {
 		panic("router: duplicate Auth registration")
 	}
-	r.auths[auth] = true
 }
 
 // Handle registers a route with the given auth and handler.
@@ -85,7 +86,7 @@ func (r *Router) Handle(pattern string, auth Auth, handler http.Handler) {
 	if auth == nil {
 		panic("router: auth must not be nil")
 	}
-	if !r.auths[auth] {
+	if !r.auths.Contains(auth) {
 		panic("router: auth not registered (call Register first)")
 	}
 	pat, err := parsePattern(pattern)
