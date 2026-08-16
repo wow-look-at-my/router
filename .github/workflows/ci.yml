@@ -8,6 +8,12 @@ permissions:
   contents: write # go-toolchain's dependency graph submission needs write
   actions: read
   checks: read
+  # go-toolchain's autorelease registers each publish as a GitHub Deployment
+  # and records the upload on the org's linked-artifacts page. Both are part of
+  # publishing with no opt-out, so without these the build FAILS ("Could not
+  # create the GitHub Deployment") rather than skipping the registration.
+  deployments: write
+  artifact-metadata: write
 
 jobs:
   test:
