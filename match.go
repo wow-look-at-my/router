@@ -51,6 +51,7 @@ func matchHostSegs(segs []hostSeg, hostLabels []string) (values []string, ok boo
 		values = append(values, strings.Join(hostLabels[fixed:], "."))
 	}
 	return values, true
+
 }
 
 func splitPath(rawPath string) []string {
